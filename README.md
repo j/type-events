@@ -1,17 +1,20 @@
 <h1 align="center" style="border-bottom: none;">🔗 type-events</h1>
 <h3 align="center">A simple <a href="https://www.typescriptlang.org/docs/handbook/decorators.html">@decorator</a> based event dispatcher.</h3>
 
+A simple event dispatcher to dispatch custom events and register synchronous or asynchronous handlers for those events.
+By default, events are emitted synchronously (`isAsync: false`) with a `priority` of 0.
+
 ### Basics
-type-events allows you to create simple ways dispatch and subscribe to events.
+`type-events` allows you to create simple ways dispatch and subscribe to events.
 
 ```typescript
-import { Event, EventDispatcher, EventSubscriber, On } from 'type-events';
+import { EventDispatcher, EventSubscriber, On } from 'type-events';
 
-class Conversion extends Event {
+class Conversion {
   constructor(public userAgent: string, public revenue: number) {}
 }
 
-class Impression extends Event {
+class Impression {
   constructor(public userAgent: string) {}
 }
 
@@ -30,9 +33,9 @@ export class TrackingSubscriber {
 
 @EventSubscriber()
 export class NotifySlack {
-  // You can listen on multiple events as well as define it's priority.
-  // The higher priority is, the sooner it gets executed
-  @On([Impression, Conversion], { priority: -255 })
+  // Make this handler low priority and run without waiting for the result
+  // before moving to the next event.
+  @On([Impression, Conversion], { priority: -255, isAsync: true })
   async notify(event: Impression | Conversion): Promise<void> {
     if (event instanceof Impression) {
       // do something with impression events

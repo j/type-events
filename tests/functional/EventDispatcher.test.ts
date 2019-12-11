@@ -1,11 +1,12 @@
 import 'reflect-metadata';
-import { EventDispatcher, Event, On, EventSubscriber } from '../../src';
+import { EventDispatcher, On, EventSubscriber } from '../../src';
 
-class ImpressionEvent extends Event {}
-
-class ConversionEvent extends Event {
+class ImpressionEvent {
   order: string[] = [];
-  shouldStopPropagation: boolean = false;
+}
+
+class ConversionEvent {
+  order: string[] = [];
 }
 
 describe('DocumentManager', () => {
@@ -16,7 +17,8 @@ describe('DocumentManager', () => {
     onConversion: jest.fn(),
     afterConversion: jest.fn(),
     beforeConversion: jest.fn(),
-    onImpression: jest.fn()
+    onImpression: jest.fn(),
+    onImpressionAsync: jest.fn()
   };
 
   beforeAll(async () => {
@@ -24,6 +26,7 @@ describe('DocumentManager', () => {
     class SlackSubscriber {
       @On([ImpressionEvent, ConversionEvent], { priority: -99 })
       async onConversionOrImpression(event: ConversionEvent | ImpressionEvent) {
+        event.order.push('onConversionOrImpression');
         spies.onConversionOrImpression(event);
       }
     }
@@ -38,12 +41,14 @@ describe('DocumentManager', () => {
 
       @On(ConversionEvent, { priority: 1 })
       async afterConversion(event: ConversionEvent) {
-        event.order.push('afterConversion');
-        spies.afterConversion(event);
+        return new Promise(resolve => {
+          setTimeout(() => {
+            event.order.push('afterConversion');
+            spies.afterConversion(event);
 
-        if (event.shouldStopPropagation) {
-          event.stopPropagation();
-        }
+            resolve();
+          }, 100);
+        });
       }
 
       @On(ConversionEvent, { priority: 3 })
@@ -57,7 +62,22 @@ describe('DocumentManager', () => {
     class ImpressionSubscriber {
       @On(ImpressionEvent)
       onImpression(event: ImpressionEvent) {
+        event.order.push('onImpression');
         spies.onImpression(event);
+      }
+
+      // give this event a super high priority to prove it's being executed last even though
+      // the promise starts first
+      @On(ImpressionEvent, { isAsync: true, priority: 255 })
+      async onImpressionAsync(event: ImpressionEvent) {
+        return new Promise(resolve => {
+          setTimeout(() => {
+            event.order.push('onImpressionAsync');
+            spies.onImpressionAsync(event);
+
+            resolve();
+          }, 150);
+        });
       }
     }
 
@@ -88,7 +108,8 @@ describe('DocumentManager', () => {
     expect(event.order).toEqual([
       'beforeConversion',
       'onConversion',
-      'afterConversion'
+      'afterConversion',
+      'onConversionOrImpression'
     ]);
   });
 
@@ -102,27 +123,15 @@ describe('DocumentManager', () => {
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
 
+    expect(spies.onImpressionAsync).toBeCalledTimes(1);
+    expect(spies.onImpressionAsync).toBeCalledWith(event);
+
     expect(spies.onConversion).toBeCalledTimes(0);
-  });
-
-  test('stops propagation', async () => {
-    const event = new ConversionEvent();
-    event.shouldStopPropagation = true;
-    await dispatcher.dispatch(event);
-
-    expect(spies.onConversion).toBeCalledTimes(1);
-    expect(spies.onConversion).toBeCalledWith(event);
-
-    expect(spies.afterConversion).toBeCalledTimes(1);
-    expect(spies.afterConversion).toBeCalledWith(event);
-
-    expect(spies.onConversionOrImpression).toBeCalledTimes(0);
-    expect(spies.onImpression).toBeCalledTimes(0);
 
     expect(event.order).toEqual([
-      'beforeConversion',
-      'onConversion',
-      'afterConversion'
+      'onImpression',
+      'onConversionOrImpression',
+      'onImpressionAsync'
     ]);
   });
 
@@ -155,7 +164,7 @@ describe('DocumentManager', () => {
   });
 
   test('ignores events that do not have any subscribers', async () => {
-    class Foo extends Event {}
+    class Foo {}
     await dispatcher.dispatch(new Foo());
     Object.values(spies).forEach(spy => expect(spy).toBeCalledTimes(0));
   });

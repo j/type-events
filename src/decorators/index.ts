@@ -1,6 +1,5 @@
 import { EventSubscriberMetadataBuilder } from '../metadata';
-import { EventConstructor } from '../interfaces';
-import { Event } from '../Event';
+import { Newable } from '../interfaces';
 
 export function EventSubscriber(): ClassDecorator {
   return (target: any) => {
@@ -8,9 +7,14 @@ export function EventSubscriber(): ClassDecorator {
   };
 }
 
-export function On<T extends Event>(
-  eventOrEvents: EventConstructor<T> | EventConstructor<T>[],
-  config: { priority?: number } = {}
+interface OnConfig {
+  priority?: number;
+  isAsync?: boolean;
+}
+
+export function On<T>(
+  eventOrEvents: Newable<T> | Newable<T>[],
+  config: OnConfig = {}
 ): PropertyDecorator {
   return (target: any, method: string) => {
     const metadata = EventSubscriberMetadataBuilder.getOrCreateSubscriberMetadata(
@@ -29,7 +33,8 @@ export function On<T extends Event>(
       metadata.methods.get(method).set(event, {
         method,
         event,
-        priority: config.priority || 1
+        priority: config.priority,
+        isAsync: config.isAsync
       });
     });
   };

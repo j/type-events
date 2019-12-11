@@ -1,65 +1,68 @@
-import { Event } from './Event';
-import {
-  EventSubscriberConstructor,
-  EventConstructor,
-  ContainerLike
-} from './interfaces';
+import { Newable, ContainerLike } from './interfaces';
 import { EventSubscriberMetadataBuilder } from './metadata';
 
-export type Handler = <T extends Event>(event: T) => Promise<void> | void;
+export type Handler = <T>(event: T) => Promise<void>;
 
 export interface HandlerConfig {
-  priority: number;
   handler: Handler;
+  priority?: number;
+  isAsync?: boolean;
 }
 
 export interface EventDispatcherConfig {
-  subscribers: EventSubscriberConstructor[];
+  subscribers: Newable[];
   container?: ContainerLike;
 }
 
 export class EventDispatcher {
-  protected handlers: Map<EventConstructor, HandlerConfig[]> = new Map();
+  protected handlers: Map<Newable, HandlerConfig[]> = new Map();
 
   constructor(config: EventDispatcherConfig) {
     EventSubscriberMetadataBuilder.build({ dispatcher: this, ...config });
   }
 
-  async dispatch<T extends Event>(event: T): Promise<void> {
-    const EventConstructor = (event as any).constructor;
+  async dispatch<T>(event: T): Promise<void> {
+    const Newable = (event as any).constructor;
 
-    if (!this.handlers.has(EventConstructor)) {
+    if (!this.handlers.has(Newable)) {
       return;
     }
 
-    for (let config of this.handlers.get(EventConstructor)) {
-      if (event.isPropagationStopped()) {
-        break;
-      }
+    const deferred: Promise<void>[] = [];
 
-      await config.handler(event);
+    for (let config of this.handlers.get(Newable)) {
+      const promise = config.handler(event);
+
+      if (!config.isAsync) {
+        await promise;
+      } else {
+        deferred.push(promise);
+      }
     }
+
+    await Promise.all(deferred);
   }
 
-  addSubscriber(
-    EventConstructor: EventConstructor,
-    subscriber: HandlerConfig
-  ): void {
-    const subscribers = this.getEventSubscribers(EventConstructor);
+  addSubscriber<T>(Newable: Newable<T>, subscriber: HandlerConfig): void {
+    const subscribers = this.getEventSubscribers(Newable);
+
+    subscriber.priority =
+      typeof subscriber.priority !== 'undefined' ? subscriber.priority : 0;
+    subscriber.isAsync =
+      typeof subscriber.isAsync !== 'undefined' ? subscriber.isAsync : false;
+
     subscribers.push(subscriber);
     this.sortSubscribers(subscribers);
   }
 
-  private getEventSubscribers(
-    EventConstructor: EventConstructor
-  ): HandlerConfig[] {
+  private getEventSubscribers(Newable: Newable): HandlerConfig[] {
     let handlers: HandlerConfig[];
 
-    if (!this.handlers.has(EventConstructor)) {
+    if (!this.handlers.has(Newable)) {
       handlers = [];
-      this.handlers.set(EventConstructor, handlers);
+      this.handlers.set(Newable, handlers);
     } else {
-      handlers = this.handlers.get(EventConstructor);
+      handlers = this.handlers.get(Newable);
     }
 
     return handlers;

@@ -1,20 +1,20 @@
 import { EventDispatcher } from '../EventDispatcher';
-import { Event } from '../Event';
-import { EventSubscriberConstructor, ContainerLike } from '../interfaces';
+import { Newable, ContainerLike } from '../interfaces';
 
-export interface EventSubscriberMethodMetadata<T extends Event = any> {
+export interface EventSubscriberMethodMetadata<T = any> {
   method: string;
   event: T;
-  priority: number;
+  priority?: number;
+  isAsync?: boolean;
 }
 
 export interface EventSubscriberMetadata<T = any> {
-  EventSubscriber: EventSubscriberConstructor<T>;
+  EventSubscriber: Newable<T>;
   methods: Map<string, Map<any, EventSubscriberMethodMetadata>>;
 }
 
 const storage: {
-  subscribers: Map<EventSubscriberConstructor, EventSubscriberMetadata>;
+  subscribers: Map<Newable, EventSubscriberMetadata>;
 } = (global as any).__TYPE_EVENTS_STORAGE__ || {
   subscribers: new Map()
 };
@@ -25,14 +25,12 @@ const defaultContainer = {
 
 export interface BuildSubscribersConfig {
   dispatcher: EventDispatcher;
-  subscribers: EventSubscriberConstructor[];
+  subscribers: Newable[];
   container?: ContainerLike;
 }
 
 export class EventSubscriberMetadataBuilder {
-  static getOrCreateSubscriberMetadata(
-    EventSubscriber: EventSubscriberConstructor
-  ) {
+  static getOrCreateSubscriberMetadata(EventSubscriber: Newable) {
     if (!storage.subscribers.has(EventSubscriber)) {
       storage.subscribers.set(EventSubscriber, {
         EventSubscriber,
@@ -63,9 +61,8 @@ export class EventSubscriberMetadataBuilder {
           methodDefinitions.forEach(methodDefinition => {
             dispatcher.addSubscriber(methodDefinition.event, {
               priority: methodDefinition.priority,
-              handler: async (event: any) => {
-                return subscriber[methodDefinition.method](event);
-              }
+              isAsync: methodDefinition.isAsync,
+              handler: subscriber[methodDefinition.method]
             });
           });
         });
