@@ -26,8 +26,8 @@ export class TrackingSubscriber {
   }
 
   @On(Impression)
-  async onImpression(event: Conversion): Promise<void> {
-    // do something with conversion events
+  async onImpression(event: Impression): Promise<void> {
+    // do something with impression events
   }
 }
 
