@@ -4,7 +4,8 @@ import { EventSubscriberMetadataBuilder } from './metadata';
 export type Handler = <T>(event: T) => Promise<void>;
 
 export interface HandlerConfig {
-  handler: Handler;
+  EventSubscriber: Newable;
+  method: string;
   priority?: number;
   isAsync?: boolean;
 }
@@ -14,10 +15,17 @@ export interface EventDispatcherConfig {
   container?: ContainerLike;
 }
 
+const defaultContainer = {
+  get: <T>(EventSubscriber: new (...args: any[]) => T) => new EventSubscriber()
+};
+
 export class EventDispatcher {
+  protected container: ContainerLike;
   protected handlers: Map<Newable, HandlerConfig[]> = new Map();
 
   constructor(config: EventDispatcherConfig) {
+    this.container = config.container || defaultContainer;
+
     EventSubscriberMetadataBuilder.build({ dispatcher: this, ...config });
   }
 
@@ -31,7 +39,8 @@ export class EventDispatcher {
     const deferred: Promise<void>[] = [];
 
     for (let config of this.handlers.get(Newable)) {
-      const promise = config.handler(event);
+      const service = this.container.get(config.EventSubscriber);
+      const promise = service[config.method](event);
 
       if (!config.isAsync) {
         await promise;

@@ -19,10 +19,6 @@ const storage: {
   subscribers: new Map()
 };
 
-const defaultContainer = {
-  get: <T>(EventSubscriber: new (...args: any[]) => T) => new EventSubscriber()
-};
-
 export interface BuildSubscribersConfig {
   dispatcher: EventDispatcher;
   subscribers: Newable[];
@@ -44,8 +40,6 @@ export class EventSubscriberMetadataBuilder {
   static build(config: BuildSubscribersConfig) {
     const { dispatcher, subscribers } = config;
 
-    const container = config.container || defaultContainer;
-
     subscribers.forEach(EventSubscriber => {
       if (!storage.subscribers.has(EventSubscriber)) {
         throw new Error(
@@ -53,16 +47,15 @@ export class EventSubscriberMetadataBuilder {
         );
       }
 
-      const subscriber = container.get(EventSubscriber);
-
       storage.subscribers
         .get(EventSubscriber)
         .methods.forEach(methodDefinitions => {
           methodDefinitions.forEach(methodDefinition => {
             dispatcher.addSubscriber(methodDefinition.event, {
+              EventSubscriber,
+              method: methodDefinition.method,
               priority: methodDefinition.priority,
-              isAsync: methodDefinition.isAsync,
-              handler: subscriber[methodDefinition.method]
+              isAsync: methodDefinition.isAsync
             });
           });
         });
