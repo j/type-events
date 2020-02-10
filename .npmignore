@@ -1,0 +1,9 @@
+src
+coverage
+tests
+README.md
+tsconfig.json
+tslint.json
+*.spec.ts
+*.test.ts
+.prettierrc
