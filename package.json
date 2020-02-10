@@ -1,6 +1,6 @@
 {
   "name": "type-events",
-  "version": "0.0.0-alpha",
+  "version": "0.0.1-beta1",
   "description": "An event dispatcher",
   "keywords": [],
   "author": "Jordan <j@jrdn.org>",
@@ -22,8 +22,7 @@
     "test:ci": "jest --verbose --coverage --ci --forceExit --detectOpenHandles --runInBand",
     "pretty": "prettier '{src,tests}/**/*.ts' --write"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/jest": "^24.0.18",
     "@types/node": "^12.12.17",
