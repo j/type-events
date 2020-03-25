@@ -1,5 +1,6 @@
 import { Newable, ContainerLike } from './interfaces';
 import { EventSubscriberMetadataBuilder } from './metadata';
+import { isPromise } from './utils/isPromise';
 
 export type Handler = <T>(event: T) => Promise<void>;
 
@@ -39,7 +40,10 @@ export class EventDispatcher {
     const deferred: Promise<void>[] = [];
 
     for (let config of this.handlers.get(Newable)) {
-      const service = this.container.get(config.EventSubscriber);
+      const serviceOrPromise = this.container.get(config.EventSubscriber);
+      const service = isPromise(serviceOrPromise)
+        ? await serviceOrPromise
+        : serviceOrPromise;
       const promise = service[config.method](event);
 
       if (!config.isAsync) {

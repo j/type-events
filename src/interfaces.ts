@@ -3,5 +3,5 @@ export interface Newable<T = any> {
 }
 
 export interface ContainerLike {
-  get: <T = any>(service: Newable<T>) => T;
+  get: (service: any) => any;
 }
