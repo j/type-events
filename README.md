@@ -1,3 +1,5 @@
+### I'm currently using this with decent volume in production.  When I feel it's proven to be fully stable, I'll mark a "stable" veresion of this library.  Until then, my commits & NPM publishes may not be up to date.  Feel free to contribute / mark issues or feature requests.  Star this and I'll most likely go through each project with the most interest to stabilize and clean up.
+
 <h1 align="center" style="border-bottom: none;">🔗 type-events</h1>
 <h3 align="center">A simple <a href="https://www.typescriptlang.org/docs/handbook/decorators.html">@decorator</a> based event dispatcher.</h3>
 
