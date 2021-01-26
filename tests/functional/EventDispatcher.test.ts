@@ -68,16 +68,12 @@ describe('DocumentManager', () => {
 
       // give this event a super high priority to prove it's being executed last even though
       // the promise starts first
-      @On(ImpressionEvent, { isAsync: true, priority: 255 })
+      @On(ImpressionEvent, { background: true, priority: 255 })
       async onImpressionAsync(event: ImpressionEvent) {
-        return new Promise(resolve => {
-          setTimeout(() => {
-            event.order.push('onImpressionAsync');
-            spies.onImpressionAsync(event);
-
-            resolve();
-          }, 150);
-        });
+        setTimeout(() => {
+          event.order.push('onImpressionAsync');
+          spies.onImpressionAsync(event);
+        }, 250);
       }
     }
 
@@ -123,10 +119,14 @@ describe('DocumentManager', () => {
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
 
+    expect(spies.onConversion).toBeCalledTimes(0);
+
+    expect(event.order).toEqual(['onImpression', 'onConversionOrImpression']);
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     expect(spies.onImpressionAsync).toBeCalledTimes(1);
     expect(spies.onImpressionAsync).toBeCalledWith(event);
-
-    expect(spies.onConversion).toBeCalledTimes(0);
 
     expect(event.order).toEqual([
       'onImpression',

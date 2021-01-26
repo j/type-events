@@ -5,7 +5,7 @@ export interface EventSubscriberMethodMetadata<T = any> {
   method: string;
   event: T;
   priority?: number;
-  isAsync?: boolean;
+  background?: boolean;
 }
 
 export interface EventSubscriberMetadata<T = any> {
@@ -55,7 +55,7 @@ export class EventSubscriberMetadataBuilder {
               EventSubscriber,
               method: methodDefinition.method,
               priority: methodDefinition.priority,
-              isAsync: methodDefinition.isAsync
+              background: methodDefinition.background
             });
           });
         });

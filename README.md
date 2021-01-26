@@ -1,12 +1,10 @@
-### I'm currently using this with decent volume in production.  When I feel it's proven to be fully stable, I'll mark a "stable" veresion of this library.  Until then, my commits & NPM publishes may not be up to date.  Feel free to contribute / mark issues or feature requests.  Star this and I'll most likely go through each project with the most interest to stabilize and clean up.
-
-<h1 align="center" style="border-bottom: none;">🔗 type-events</h1>
-<h3 align="center">A simple <a href="https://www.typescriptlang.org/docs/handbook/decorators.html">@decorator</a> based event dispatcher.</h3>
-
-A simple event dispatcher to dispatch custom events and register synchronous or asynchronous handlers for those events.
-By default, events are emitted synchronously (`isAsync: false`) with a `priority` of 0.
+<h1 align="center" style="border-bottom: none;">type-events</h1>
+<p align="center">
+    A simple <a href="https://www.typescriptlang.org/docs/handbook/decorators.html">@decorator</a> based event dispatcher.
+</p>
 
 ### Basics
+
 `type-events` allows you to create simple ways dispatch and subscribe to events.
 
 ```typescript
@@ -27,7 +25,9 @@ export class TrackingSubscriber {
     // do something with conversion events
   }
 
-  @On(Impression)
+  // The higher the priority, the sooner it's processed.
+  // Priority is not guaranteed for same-priority values.
+  @On(Impression, { priority: 255 })
   async onImpression(event: Impression): Promise<void> {
     // do something with impression events
   }
@@ -35,14 +35,17 @@ export class TrackingSubscriber {
 
 @EventSubscriber()
 export class NotifySlack {
-  // Make this handler low priority and run without waiting for the result
-  // before moving to the next event.
-  @On([Impression, Conversion], { priority: -255, isAsync: true })
+  // `background: true` makes this subscriber run after all other
+  // subscribers and doesn't wait for the result to finish
+  @On([Impression, Conversion], { background: true })
   async notify(event: Impression | Conversion): Promise<void> {
-    if (event instanceof Impression) {
-      // do something with impression events
-    } else if (event instanceof Conversion) {
-      // do something with conversion events
+    switch (event.constructor.name) {
+      case 'Impression':
+        // ...
+        break;
+      case 'Conversion':
+        // ...
+        break;
     }
   }
 }
@@ -56,7 +59,8 @@ dispatcher.dispatch(new Conversion('Chrome', 13.37));
 ```
 
 ### Advanced
-Most of the time, you want to use some sort of dependency injection (DI) alongside event dispatching.  Don't you worry, you can still do that.
+
+Most of the time, you want to use some sort of dependency injection (DI) alongside event dispatching. Don't you worry, you can still do that.
 Just pass in an appropriate DI container with a valid `get` method.
 
 ```typescript

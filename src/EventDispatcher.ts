@@ -8,12 +8,17 @@ export interface HandlerConfig {
   EventSubscriber: Newable;
   method: string;
   priority?: number;
-  isAsync?: boolean;
+  background?: boolean;
+}
+
+export interface Loggable {
+  log(...data: any[]);
 }
 
 export interface EventDispatcherConfig {
   subscribers: Newable[];
   container?: ContainerLike;
+  logger?: Loggable;
 }
 
 const defaultContainer = {
@@ -23,9 +28,11 @@ const defaultContainer = {
 export class EventDispatcher {
   protected container: ContainerLike;
   protected handlers: Map<Newable, HandlerConfig[]> = new Map();
+  protected logger: Loggable;
 
   constructor(config: EventDispatcherConfig) {
     this.container = config.container || defaultContainer;
+    this.logger = config.logger || { log: console.log };
 
     EventSubscriberMetadataBuilder.build({ dispatcher: this, ...config });
   }
@@ -37,23 +44,25 @@ export class EventDispatcher {
       return;
     }
 
-    const deferred: Promise<void>[] = [];
+    const deferred: Array<() => Promise<void>> = [];
 
     for (let config of this.handlers.get(Newable)) {
       const serviceOrPromise = this.container.get(config.EventSubscriber);
-      const service = isPromise(serviceOrPromise)
-        ? await serviceOrPromise
-        : serviceOrPromise;
-      const promise = service[config.method](event);
 
-      if (!config.isAsync) {
-        await promise;
-      } else {
-        deferred.push(promise);
+      if (serviceOrPromise) {
+        const service = isPromise(serviceOrPromise)
+          ? await serviceOrPromise
+          : serviceOrPromise;
+
+        if (config.background) {
+          deferred.push(() => service[config.method](event));
+        } else {
+          await service[config.method](event);
+        }
       }
     }
 
-    await Promise.all(deferred);
+    Promise.all(deferred.map(fn => fn())).catch(err => this.logger.log(err));
   }
 
   addSubscriber<T>(Newable: Newable<T>, subscriber: HandlerConfig): void {
@@ -61,8 +70,10 @@ export class EventDispatcher {
 
     subscriber.priority =
       typeof subscriber.priority !== 'undefined' ? subscriber.priority : 0;
-    subscriber.isAsync =
-      typeof subscriber.isAsync !== 'undefined' ? subscriber.isAsync : false;
+    subscriber.background =
+      typeof subscriber.background !== 'undefined'
+        ? subscriber.background
+        : false;
 
     subscribers.push(subscriber);
     this.sortSubscribers(subscribers);

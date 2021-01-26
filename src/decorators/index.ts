@@ -9,7 +9,7 @@ export function EventSubscriber(): ClassDecorator {
 
 interface OnConfig {
   priority?: number;
-  isAsync?: boolean;
+  background?: boolean;
 }
 
 export function On<T>(
@@ -34,7 +34,7 @@ export function On<T>(
         method,
         event,
         priority: config.priority,
-        isAsync: config.isAsync
+        background: config.background
       });
     });
   };
