@@ -3,6 +3,12 @@
     A simple <a href="https://www.typescriptlang.org/docs/handbook/decorators.html">@decorator</a> based event dispatcher.
 </p>
 
+<p align="center">
+    <a href="https://www.npmjs.com/~jrdn" target="_blank"><img src="https://img.shields.io/npm/v/type-events.svg" alt="NPM Version" /></a>
+    <a href="https://www.npmjs.com/~jrdn" target="_blank"><img src="https://img.shields.io/npm/l/type-events.svg" alt="Package License" /></a>
+    <a href="https://www.npmjs.com/~jrdn" target="_blank"><img src="https://img.shields.io/npm/dm/type-events.svg" alt="NPM Downloads" /></a>
+</p>
+
 ### Basics
 
 `type-events` allows you to create simple ways dispatch and subscribe to events.
