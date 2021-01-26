@@ -2,9 +2,17 @@
   "name": "type-events",
   "version": "0.0.1-beta4",
   "description": "An event dispatcher",
-  "keywords": [],
-  "author": "Jordan <j@jrdn.org>",
-  "license": "ISC",
+  "keywords": [
+    "typescript",
+    "ts",
+    "javascript",
+    "js",
+    "event",
+    "dispatcher",
+    "ddd"
+  ],
+  "author": "Jordan Stout <j@jrdn.org>",
+  "license": "MIT",
   "files": [
     "lib/**/*"
   ],
