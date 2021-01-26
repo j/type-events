@@ -23,6 +23,8 @@
     "clean": "rimraf lib",
     "watch": "tsc -w",
     "prepublishOnly": "yarn clean && yarn build",
+    "release:next": "npm publish --access public --tag next",
+    "release": "release-it",
     "test": "jest --runInBand --verbose --coverage",
     "test:ci": "jest --verbose --coverage --ci --forceExit --detectOpenHandles --runInBand",
     "pretty": "prettier '{src,tests}/**/*.ts' --write"
@@ -36,6 +38,7 @@
     "prettier": "^1.18.2",
     "pretty-quick": "^1.11.1",
     "reflect-metadata": "^0.1.13",
+    "release-it": "^14.2.2",
     "ts-jest": "^24.0.2",
     "typescript": "^3.6.2"
   },
@@ -48,6 +51,12 @@
   "husky": {
     "hooks": {
       "pre-commit": "pretty-quick --staged"
+    }
+  },
+  "release-it": {
+    "commitMessage": "chore: release v${version}",
+    "github": {
+      "release": true
     }
   }
 }
