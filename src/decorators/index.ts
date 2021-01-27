@@ -1,40 +1,35 @@
-import { EventSubscriberMetadataBuilder } from '../metadata';
+import { EventDispatcherMetadata } from '../metadata';
 import { Newable } from '../interfaces';
 
-export function EventSubscriber(): ClassDecorator {
-  return (target: any) => {
-    EventSubscriberMetadataBuilder.getOrCreateSubscriberMetadata(target);
-  };
-}
-
-interface OnConfig {
+interface OnOptions {
   priority?: number;
   background?: boolean;
 }
 
 export function On<T>(
-  eventOrEvents: Newable<T> | Newable<T>[],
-  config: OnConfig = {}
+  Event: Newable<T>,
+  options?: OnOptions
+): PropertyDecorator;
+export function On<T>(
+  Events: Newable<T>[],
+  options?: OnOptions
+): PropertyDecorator;
+export function On<T>(
+  EventOrEvents: Newable<T> | Newable<T>[],
+  options: OnOptions = {}
 ): PropertyDecorator {
   return (target: any, method: string) => {
-    const metadata = EventSubscriberMetadataBuilder.getOrCreateSubscriberMetadata(
-      target.constructor
-    );
+    const Events = Array.isArray(EventOrEvents)
+      ? EventOrEvents
+      : [EventOrEvents];
 
-    if (!metadata.methods.has(method)) {
-      metadata.methods.set(method, new Map());
-    }
-
-    const events = Array.isArray(eventOrEvents)
-      ? eventOrEvents
-      : [eventOrEvents];
-
-    events.forEach(event => {
-      metadata.methods.get(method).set(event, {
+    Events.map(Event => {
+      EventDispatcherMetadata.addEventMetadata({
+        Event,
+        EventSubscriber: target.constructor,
         method,
-        event,
-        priority: config.priority,
-        background: config.background
+        priority: options.priority || 0,
+        background: options.background || false
       });
     });
   };

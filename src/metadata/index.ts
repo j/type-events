@@ -1,64 +1,48 @@
-import { EventDispatcher } from '../EventDispatcher';
-import { Newable, ContainerLike } from '../interfaces';
+import { Newable } from '../interfaces';
 
-export interface EventSubscriberMethodMetadata<T = any> {
-  method: string;
-  event: T;
-  priority?: number;
-  background?: boolean;
-}
-
-export interface EventSubscriberMetadata<T = any> {
+export interface EventMetadata<T = any> {
+  Event: T;
   EventSubscriber: Newable<T>;
-  methods: Map<string, Map<any, EventSubscriberMethodMetadata>>;
+  method: string;
+  priority: number;
+  background: boolean;
 }
 
-const storage: {
-  subscribers: Map<Newable, EventSubscriberMetadata>;
-} = (global as any).__TYPE_EVENTS_STORAGE__ || {
-  subscribers: new Map()
-};
+export class EventDispatcherMetadata {
+  static events: Map<Newable, EventMetadata[]> = new Map();
+  static subscribers: Map<Newable, EventMetadata[]> = new Map();
 
-export interface BuildSubscribersConfig {
-  dispatcher: EventDispatcher;
-  subscribers: Newable[];
-  container?: ContainerLike;
-}
-
-export class EventSubscriberMetadataBuilder {
-  static getOrCreateSubscriberMetadata(EventSubscriber: Newable) {
-    if (!storage.subscribers.has(EventSubscriber)) {
-      storage.subscribers.set(EventSubscriber, {
-        EventSubscriber,
-        methods: new Map()
-      });
+  static addEventMetadata(meta: EventMetadata): void {
+    // register event and it's subscriber
+    if (!this.events.has(meta.Event)) {
+      this.events.set(meta.Event, []);
     }
 
-    return storage.subscribers.get(EventSubscriber);
+    // ignore duplicate event methods on subscribers
+    if (
+      !!this.events
+        .get(meta.Event)
+        .find(
+          m =>
+            m.EventSubscriber === meta.EventSubscriber &&
+            m.method === meta.method
+        )
+    ) {
+      return;
+    }
+
+    this.events.get(meta.Event).push(meta);
+
+    // register subscriber and events it's subscribed to
+    if (!this.subscribers.has(meta.EventSubscriber)) {
+      this.subscribers.set(meta.EventSubscriber, []);
+    }
+    this.subscribers.get(meta.EventSubscriber).push(meta);
   }
 
-  static build(config: BuildSubscribersConfig) {
-    const { dispatcher, subscribers } = config;
-
-    subscribers.forEach(EventSubscriber => {
-      if (!storage.subscribers.has(EventSubscriber)) {
-        throw new Error(
-          `"${EventSubscriber.name}" is not a valid EventSubscriber`
-        );
-      }
-
-      storage.subscribers
-        .get(EventSubscriber)
-        .methods.forEach(methodDefinitions => {
-          methodDefinitions.forEach(methodDefinition => {
-            dispatcher.addSubscriber(methodDefinition.event, {
-              EventSubscriber,
-              method: methodDefinition.method,
-              priority: methodDefinition.priority,
-              background: methodDefinition.background
-            });
-          });
-        });
-    });
+  static assertEventExists(Event: Newable): void {
+    if (!this.events.has(Event)) {
+      throw new Error(`"${Event.name}" is not a valid decorated "@Event()"`);
+    }
   }
 }

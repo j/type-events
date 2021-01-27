@@ -14,7 +14,7 @@
 `type-events` allows you to create simple ways dispatch and subscribe to events.
 
 ```typescript
-import { EventDispatcher, EventSubscriber, On } from 'type-events';
+import { EventDispatcher, On } from 'type-events';
 
 class Conversion {
   constructor(public userAgent: string, public revenue: number) {}
@@ -24,7 +24,6 @@ class Impression {
   constructor(public userAgent: string) {}
 }
 
-@EventSubscriber()
 export class TrackingSubscriber {
   @On(Conversion)
   async onConversion(event: Conversion): Promise<void> {
@@ -39,7 +38,6 @@ export class TrackingSubscriber {
   }
 }
 
-@EventSubscriber()
 export class NotifySlack {
   // `background: true` makes this subscriber run after all other
   // subscribers and doesn't wait for the result to finish
@@ -64,7 +62,7 @@ const dispatcher = new EventDispatcher({
 dispatcher.dispatch(new Conversion('Chrome', 13.37));
 ```
 
-### Advanced
+### Custom Container (DI)
 
 Most of the time, you want to use some sort of dependency injection (DI) alongside event dispatching. Don't you worry, you can still do that.
 Just pass in an appropriate DI container with a valid `get` method.
@@ -79,4 +77,31 @@ const dispatcher = new EventDispatcher({
   subscribers: [...],
   container
 });
+```
+
+## Inheritance
+
+Events can extend base classes and subscribers can subscribe to those base classes.
+
+```typescript
+import { EventDispatcher, On } from 'type-events';
+
+abstract class BaseEvent {
+  // ...
+}
+
+class UserCreatedEvent extends BaseEvent {
+  // ...
+}
+
+class LoggingSubscriber {
+  @On(BaseEvent)
+  async all(event: BaseEvent): Promise<void> {
+    console.log(event);
+  }
+}
+
+// ...
+
+dispatcher.dispatch(new UserCreatedEvent());
 ```

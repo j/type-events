@@ -1,19 +1,22 @@
 import 'reflect-metadata';
-import { EventDispatcher, On, EventSubscriber } from '../../src';
+import { EventDispatcher, On } from '../../src';
 
-class ImpressionEvent {
+class BaseEvent {
   order: string[] = [];
 }
 
-class ConversionEvent {
-  order: string[] = [];
-}
+class ImpressionOrConversionEvent extends BaseEvent {}
+
+class ImpressionEvent extends ImpressionOrConversionEvent {}
+
+class ConversionEvent extends ImpressionOrConversionEvent {}
 
 describe('DocumentManager', () => {
   let dispatcher: EventDispatcher;
 
   let spies = {
     onConversionOrImpression: jest.fn(),
+    allEventLogger: jest.fn(),
     onConversion: jest.fn(),
     afterConversion: jest.fn(),
     beforeConversion: jest.fn(),
@@ -22,16 +25,20 @@ describe('DocumentManager', () => {
   };
 
   beforeAll(async () => {
-    @EventSubscriber()
     class SlackSubscriber {
-      @On([ImpressionEvent, ConversionEvent], { priority: -99 })
+      @On(ImpressionOrConversionEvent, { priority: -99 })
       async onConversionOrImpression(event: ConversionEvent | ImpressionEvent) {
         event.order.push('onConversionOrImpression');
         spies.onConversionOrImpression(event);
       }
+
+      @On(BaseEvent, { background: true })
+      async allEventLogger(event: BaseEvent) {
+        event.order.push('allEventLogger');
+        spies.allEventLogger(event);
+      }
     }
 
-    @EventSubscriber()
     class ConversionSubscriber {
       @On(ConversionEvent, { priority: 2 })
       onConversion(event: ConversionEvent) {
@@ -52,13 +59,18 @@ describe('DocumentManager', () => {
       }
 
       @On(ConversionEvent, { priority: 3 })
-      beforeConversion(event: ConversionEvent) {
-        event.order.push('beforeConversion');
-        spies.beforeConversion(event);
+      async beforeConversion(event: ConversionEvent) {
+        return new Promise(resolve => {
+          setTimeout(() => {
+            event.order.push('beforeConversion');
+            spies.beforeConversion(event);
+
+            resolve();
+          }, 100);
+        });
       }
     }
 
-    @EventSubscriber()
     class ImpressionSubscriber {
       @On(ImpressionEvent)
       onImpression(event: ImpressionEvent) {
@@ -70,10 +82,13 @@ describe('DocumentManager', () => {
       // the promise starts first
       @On(ImpressionEvent, { background: true, priority: 255 })
       async onImpressionAsync(event: ImpressionEvent) {
-        setTimeout(() => {
-          event.order.push('onImpressionAsync');
-          spies.onImpressionAsync(event);
-        }, 250);
+        return new Promise(resolve => {
+          setTimeout(() => {
+            event.order.push('onImpressionAsync');
+            spies.onImpressionAsync(event);
+            resolve();
+          }, 100);
+        });
       }
     }
 
@@ -82,11 +97,13 @@ describe('DocumentManager', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(done => {
     Object.values(spies).forEach(spy => spy.mockClear());
+
+    process.nextTick(done);
   });
 
-  test('emits conversion events', async () => {
+  test('emits conversion events', async done => {
     const event = new ConversionEvent();
     await dispatcher.dispatch(event);
 
@@ -99,6 +116,8 @@ describe('DocumentManager', () => {
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
 
+    expect(spies.allEventLogger).toBeCalledTimes(0);
+
     expect(spies.onImpression).toBeCalledTimes(0);
 
     expect(event.order).toEqual([
@@ -107,9 +126,24 @@ describe('DocumentManager', () => {
       'afterConversion',
       'onConversionOrImpression'
     ]);
+
+    process.nextTick(() => {
+      expect(spies.allEventLogger).toBeCalledTimes(1);
+      expect(spies.allEventLogger).toBeCalledWith(event);
+
+      expect(event.order).toEqual([
+        'beforeConversion',
+        'onConversion',
+        'afterConversion',
+        'onConversionOrImpression',
+        'allEventLogger'
+      ]);
+
+      done();
+    });
   });
 
-  test('emits impression events', async () => {
+  test('emits impression events', async done => {
     const event = new ImpressionEvent();
     await dispatcher.dispatch(event);
 
@@ -118,25 +152,38 @@ describe('DocumentManager', () => {
 
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
+    expect(spies.allEventLogger).toBeCalledTimes(0);
 
     expect(spies.onConversion).toBeCalledTimes(0);
 
     expect(event.order).toEqual(['onImpression', 'onConversionOrImpression']);
 
-    await new Promise(resolve => setTimeout(resolve, 300));
+    process.nextTick(() => {
+      expect(spies.onImpressionAsync).toBeCalledTimes(0);
+      expect(spies.allEventLogger).toBeCalledTimes(1);
+      expect(spies.allEventLogger).toBeCalledWith(event);
 
-    expect(spies.onImpressionAsync).toBeCalledTimes(1);
-    expect(spies.onImpressionAsync).toBeCalledWith(event);
+      expect(event.order).toEqual([
+        'onImpression',
+        'onConversionOrImpression',
+        'allEventLogger'
+      ]);
 
-    expect(event.order).toEqual([
-      'onImpression',
-      'onConversionOrImpression',
-      'onImpressionAsync'
-    ]);
+      // onImpressionAsync emulates a delay
+      setTimeout(() => {
+        expect(event.order).toEqual([
+          'onImpression',
+          'onConversionOrImpression',
+          'allEventLogger',
+          'onImpressionAsync'
+        ]);
+
+        done();
+      }, 150);
+    });
   });
 
   test('with custom container', async () => {
-    @EventSubscriber()
     class CustomContainerSubscriber {
       @On(ConversionEvent)
       async onConversion(event: ConversionEvent) {
@@ -153,6 +200,35 @@ describe('DocumentManager', () => {
           getFn();
 
           return new Service();
+        }
+      }
+    });
+
+    const event = new ConversionEvent();
+    await dispatcherWithContainer.dispatch(event);
+
+    expect(getFn).toBeCalledTimes(1);
+  });
+
+  test('with custom async container', async () => {
+    class CustomContainerSubscriber {
+      @On(ConversionEvent)
+      async onConversion(event: ConversionEvent) {
+        spies.onConversion(event);
+      }
+    }
+
+    const getFn = jest.fn();
+
+    const dispatcherWithContainer = new EventDispatcher({
+      subscribers: [CustomContainerSubscriber],
+      container: {
+        async get(Service) {
+          return new Promise(resolve => {
+            getFn();
+
+            resolve(new Service());
+          });
         }
       }
     });

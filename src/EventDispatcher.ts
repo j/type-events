@@ -1,98 +1,171 @@
-import { Newable, ContainerLike } from './interfaces';
-import { EventSubscriberMetadataBuilder } from './metadata';
+import { Newable, ContainerLike, DispatchEvent, Loggable } from './interfaces';
+import { EventDispatcherMetadata, EventMetadata } from './metadata';
 import { isPromise } from './utils/isPromise';
+import { Container } from './utils/Container';
+import { Logger } from './utils/Logger';
+import { EventDispatcherError } from './utils/errors';
 
-export type Handler = <T>(event: T) => Promise<void>;
-
-export interface HandlerConfig {
-  EventSubscriber: Newable;
-  method: string;
-  priority?: number;
-  background?: boolean;
-}
-
-export interface Loggable {
-  log(...data: any[]);
-}
-
-export interface EventDispatcherConfig {
+export interface EventDispatcherOptions {
   subscribers: Newable[];
   container?: ContainerLike;
   logger?: Loggable;
 }
 
-const defaultContainer = {
-  get: <T>(EventSubscriber: new (...args: any[]) => T) => new EventSubscriber()
-};
+export interface DispatchableEvent extends EventMetadata {
+  dispatch: DispatchEvent;
+}
 
 export class EventDispatcher {
-  protected container: ContainerLike;
-  protected handlers: Map<Newable, HandlerConfig[]> = new Map();
-  protected logger: Loggable;
+  /**
+   * All of the events that were built on EventDispatcher instantiation
+   */
+  protected readonly events: Map<Newable, DispatchableEvent[]> = new Map();
 
-  constructor(config: EventDispatcherConfig) {
-    this.container = config.container || defaultContainer;
-    this.logger = config.logger || { log: console.log };
+  /**
+   * Subscribers that were generated upon an event dispatch that contain
+   * all of the subscriber handlers in proper order.
+   */
+  protected readonly subscribers: Map<Newable, DispatchableEvent[]> = new Map();
 
-    EventSubscriberMetadataBuilder.build({ dispatcher: this, ...config });
+  /**
+   * How event subscribers are created.
+   */
+  protected readonly container: ContainerLike;
+
+  /**
+   * Custom logger for instances where a subscriber errors in the background.
+   */
+  protected readonly logger: Loggable;
+
+  constructor(options: EventDispatcherOptions) {
+    this.container = options.container || new Container();
+    this.logger = options.logger || new Logger();
+    this.build(options);
   }
 
-  async dispatch<T>(event: T): Promise<void> {
-    const Newable = (event as any).constructor;
+  /**
+   * Dispatches the event to all the subscribers.
+   */
+  async dispatch<T>(event: T): Promise<T> {
+    const events = this.getEventSubscribers((event as any).constructor);
 
-    if (!this.handlers.has(Newable)) {
-      return;
-    }
-
-    const deferred: Array<() => Promise<void>> = [];
-
-    for (let config of this.handlers.get(Newable)) {
-      const serviceOrPromise = this.container.get(config.EventSubscriber);
-
-      if (serviceOrPromise) {
-        const service = isPromise(serviceOrPromise)
-          ? await serviceOrPromise
-          : serviceOrPromise;
-
-        if (config.background) {
-          deferred.push(() => service[config.method](event));
-        } else {
-          await service[config.method](event);
-        }
+    for (const e of events) {
+      const result = e.dispatch(event);
+      if (isPromise(result)) {
+        await result;
       }
     }
 
-    Promise.all(deferred.map(fn => fn())).catch(err => this.logger.log(err));
+    return event;
   }
 
-  addSubscriber<T>(Newable: Newable<T>, subscriber: HandlerConfig): void {
-    const subscribers = this.getEventSubscribers(Newable);
+  /**
+   * Builds the events for the given subscribers and pre-computes
+   * it's dispatch function.
+   */
+  private build(options: EventDispatcherOptions): void {
+    options.subscribers.forEach(EventSubscriber => {
+      if (!EventDispatcherMetadata.subscribers.has(EventSubscriber)) {
+        throw new Error(
+          `"${EventSubscriber.name}" is not a valid EventSubscriber`
+        );
+      }
 
-    subscriber.priority =
-      typeof subscriber.priority !== 'undefined' ? subscriber.priority : 0;
-    subscriber.background =
-      typeof subscriber.background !== 'undefined'
-        ? subscriber.background
-        : false;
+      EventDispatcherMetadata.subscribers
+        .get(EventSubscriber)
+        .forEach(eventMetadata => {
+          const { Event } = eventMetadata;
 
-    subscribers.push(subscriber);
-    this.sortSubscribers(subscribers);
+          if (!this.events.has(Event)) {
+            this.events.set(Event, []);
+          }
+
+          this.events.get(Event).push({
+            ...eventMetadata,
+            dispatch: this.createDispatchFunction(eventMetadata)
+          });
+        });
+    });
   }
 
-  private getEventSubscribers(Newable: Newable): HandlerConfig[] {
-    let handlers: HandlerConfig[];
-
-    if (!this.handlers.has(Newable)) {
-      handlers = [];
-      this.handlers.set(Newable, handlers);
-    } else {
-      handlers = this.handlers.get(Newable);
+  /**
+   * Creates a tree of all the subscribed events for the given Event and
+   * it's inherited parents.
+   *
+   * Returns the cached version if it was already computed.
+   */
+  protected getEventSubscribers(Event: Newable): DispatchableEvent[] {
+    if (this.subscribers.has(Event)) {
+      return this.subscribers.get(Event);
     }
 
-    return handlers;
+    const events: DispatchableEvent[] = [];
+
+    // check event and it's parents for any other registered events
+    let CurrentEvent = Event;
+    while (CurrentEvent) {
+      if (this.events.has(CurrentEvent)) {
+        this.events.get(CurrentEvent).forEach(e => events.push(e));
+      }
+
+      CurrentEvent = Object.getPrototypeOf(CurrentEvent);
+    }
+
+    events.sort((a, b) => b.priority - a.priority);
+
+    this.subscribers.set(Event, events);
+
+    return events;
   }
 
-  private sortSubscribers(subscribers: HandlerConfig[]) {
-    subscribers.sort((a, b) => b.priority - a.priority);
+  /**
+   * Computes the event's "dispatch" method.
+   *
+   * It sort of optimizes the call by creating different versions of the
+   * dispatcher based on it's metadata.
+   */
+  protected createDispatchFunction(
+    eventMetadata: EventMetadata
+  ): DispatchEvent {
+    const { EventSubscriber, background, method } = eventMetadata;
+
+    const dispatchEvent = (event: any): Promise<any> | any => {
+      // containers can potentially resolve dependencies asynchronously
+      const subscriber = this.container.get(EventSubscriber);
+      if (!subscriber) {
+        throw new EventDispatcherError(
+          `${EventSubscriber.name} not found in container`
+        );
+      }
+
+      // resolve container & emit event if container is a promise
+      if (isPromise(subscriber)) {
+        return subscriber
+          .then(s => s[method](event))
+          .catch(err => this.logger.error(err));
+      }
+
+      try {
+        const result = subscriber[method](event);
+        if (isPromise(result)) {
+          result.catch(err => this.logger.error(err));
+        }
+        return result;
+      } catch (err) {
+        this.logger.error(err);
+      }
+    };
+
+    if (background) {
+      return (event: any): any => {
+        process.nextTick(() => {
+          dispatchEvent(event);
+        });
+      };
+    }
+
+    return (event: any): any => {
+      return dispatchEvent(event);
+    };
   }
 }
