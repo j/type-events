@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import FakeTimers from '@sinonjs/fake-timers';
 import { EventDispatcher, On } from '../../src';
 
 class BaseEvent {
@@ -13,6 +14,7 @@ class ConversionEvent extends ImpressionOrConversionEvent {}
 
 describe('DocumentManager', () => {
   let dispatcher: EventDispatcher;
+  let clock: any;
 
   let spies = {
     onConversionOrImpression: jest.fn(),
@@ -25,6 +27,8 @@ describe('DocumentManager', () => {
   };
 
   beforeAll(async () => {
+    clock = FakeTimers.install();
+
     class SlackSubscriber {
       @On(ImpressionOrConversionEvent, { priority: -99 })
       async onConversionOrImpression(event: ConversionEvent | ImpressionEvent) {
@@ -49,43 +53,41 @@ describe('DocumentManager', () => {
       @On(ConversionEvent, { priority: 1 })
       async afterConversion(event: ConversionEvent) {
         return new Promise(resolve => {
-          setTimeout(() => {
-            event.order.push('afterConversion');
-            spies.afterConversion(event);
-
-            resolve();
-          }, 100);
+          event.order.push('afterConversion');
+          spies.afterConversion(event);
+          resolve();
         });
       }
 
       @On(ConversionEvent, { priority: 3 })
       async beforeConversion(event: ConversionEvent) {
         return new Promise(resolve => {
-          setTimeout(() => {
-            event.order.push('beforeConversion');
-            spies.beforeConversion(event);
-
-            resolve();
-          }, 100);
+          event.order.push('beforeConversion');
+          spies.beforeConversion(event);
+          resolve();
         });
       }
     }
 
     class ImpressionSubscriber {
       @On(ImpressionEvent)
-      onImpression(event: ImpressionEvent) {
-        event.order.push('onImpression');
-        spies.onImpression(event);
+      async onImpression(event: ImpressionEvent) {
+        return new Promise(resolve => {
+          event.order.push('onImpression');
+          spies.onImpression(event);
+          resolve();
+        });
       }
 
       // give this event a super high priority to prove it's being executed last even though
       // the promise starts first
       @On(ImpressionEvent, { background: true, priority: 255 })
       async onImpressionAsync(event: ImpressionEvent) {
+        event.order.push('onImpressionAsync');
+        spies.onImpressionAsync(event);
         return new Promise(resolve => {
           setTimeout(() => {
-            event.order.push('onImpressionAsync');
-            spies.onImpressionAsync(event);
+            event.order.push('onImpressionAsync:DONE');
             resolve();
           }, 100);
         });
@@ -97,29 +99,25 @@ describe('DocumentManager', () => {
     });
   });
 
-  afterEach(done => {
+  afterEach(() => {
+    clock.reset();
     Object.values(spies).forEach(spy => spy.mockClear());
-
-    process.nextTick(done);
   });
 
-  test('emits conversion events', async done => {
+  afterAll(() => clock.uninstall());
+
+  test('emits conversion events', async () => {
     const event = new ConversionEvent();
     await dispatcher.dispatch(event);
 
     expect(spies.onConversion).toBeCalledTimes(1);
     expect(spies.onConversion).toBeCalledWith(event);
-
     expect(spies.afterConversion).toBeCalledTimes(1);
     expect(spies.afterConversion).toBeCalledWith(event);
-
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
-
     expect(spies.allEventLogger).toBeCalledTimes(0);
-
     expect(spies.onImpression).toBeCalledTimes(0);
-
     expect(event.order).toEqual([
       'beforeConversion',
       'onConversion',
@@ -127,60 +125,43 @@ describe('DocumentManager', () => {
       'onConversionOrImpression'
     ]);
 
-    process.nextTick(() => {
-      expect(spies.allEventLogger).toBeCalledTimes(1);
-      expect(spies.allEventLogger).toBeCalledWith(event);
-
-      expect(event.order).toEqual([
-        'beforeConversion',
-        'onConversion',
-        'afterConversion',
-        'onConversionOrImpression',
-        'allEventLogger'
-      ]);
-
-      done();
-    });
+    // verify background tasks complete in another event loop
+    await clock.runAllAsync();
+    expect(spies.allEventLogger).toBeCalledTimes(1);
+    expect(spies.allEventLogger).toBeCalledWith(event);
+    expect(event.order).toEqual([
+      'beforeConversion',
+      'onConversion',
+      'afterConversion',
+      'onConversionOrImpression',
+      'allEventLogger'
+    ]);
   });
 
-  test('emits impression events', async done => {
+  test('emits impression events', async () => {
     const event = new ImpressionEvent();
     await dispatcher.dispatch(event);
 
     expect(spies.onImpression).toBeCalledTimes(1);
     expect(spies.onImpression).toBeCalledWith(event);
-
     expect(spies.onConversionOrImpression).toBeCalledTimes(1);
     expect(spies.onConversionOrImpression).toBeCalledWith(event);
     expect(spies.allEventLogger).toBeCalledTimes(0);
-
     expect(spies.onConversion).toBeCalledTimes(0);
-
     expect(event.order).toEqual(['onImpression', 'onConversionOrImpression']);
 
-    process.nextTick(() => {
-      expect(spies.onImpressionAsync).toBeCalledTimes(0);
-      expect(spies.allEventLogger).toBeCalledTimes(1);
-      expect(spies.allEventLogger).toBeCalledWith(event);
-
-      expect(event.order).toEqual([
-        'onImpression',
-        'onConversionOrImpression',
-        'allEventLogger'
-      ]);
-
-      // onImpressionAsync emulates a delay
-      setTimeout(() => {
-        expect(event.order).toEqual([
-          'onImpression',
-          'onConversionOrImpression',
-          'allEventLogger',
-          'onImpressionAsync'
-        ]);
-
-        done();
-      }, 150);
-    });
+    // verify background tasks complete in another event loop
+    await clock.runAllAsync();
+    expect(spies.onImpressionAsync).toBeCalledTimes(1);
+    expect(spies.allEventLogger).toBeCalledTimes(1);
+    expect(spies.allEventLogger).toBeCalledWith(event);
+    expect(event.order).toEqual([
+      'onImpression',
+      'onConversionOrImpression',
+      'onImpressionAsync',
+      'allEventLogger',
+      'onImpressionAsync:DONE'
+    ]);
   });
 
   test('with custom container', async () => {

@@ -1,6 +1,5 @@
-import { Newable, ContainerLike, DispatchEvent, Loggable } from './interfaces';
+import { Newable, ContainerLike, Handler, Loggable } from './interfaces';
 import { EventDispatcherMetadata, EventMetadata } from './metadata';
-import { isPromise } from './utils/isPromise';
 import { Container } from './utils/Container';
 import { Logger } from './utils/Logger';
 import { EventDispatcherError } from './utils/errors';
@@ -11,21 +10,28 @@ export interface EventDispatcherOptions {
   logger?: Loggable;
 }
 
-export interface DispatchableEvent extends EventMetadata {
-  dispatch: DispatchEvent;
+export interface EventListener extends EventMetadata {
+  handler: Handler;
+}
+
+interface EventListeners {
+  normal: EventListener[];
+  background: EventListener[];
 }
 
 export class EventDispatcher {
   /**
    * All of the events that were built on EventDispatcher instantiation
    */
-  protected readonly events: Map<Newable, DispatchableEvent[]> = new Map();
+  protected readonly registered: Map<Newable, EventListener[]> = new Map();
 
   /**
-   * Subscribers that were generated upon an event dispatch that contain
-   * all of the subscriber handlers in proper order.
+   * A map containing all the ordered event handlers.
+   *
+   * The array contains prioritized synchronous events in index 0
+   * and background events in index 1.
    */
-  protected readonly subscribers: Map<Newable, DispatchableEvent[]> = new Map();
+  protected readonly listeners: Map<Newable, EventListeners> = new Map();
 
   /**
    * How event subscribers are created.
@@ -40,31 +46,55 @@ export class EventDispatcher {
   constructor(options: EventDispatcherOptions) {
     this.container = options.container || new Container();
     this.logger = options.logger || new Logger();
-    this.build(options);
+    this.buildListeners(options.subscribers);
   }
 
   /**
-   * Dispatches the event to all the subscribers.
+   * Dispatches the event to all the subscribers including all subscribers
+   * listening on it's parents as well.
    */
   async dispatch<T>(event: T): Promise<T> {
-    const events = this.getEventSubscribers((event as any).constructor);
-
-    for (const e of events) {
-      const result = e.dispatch(event);
-      if (isPromise(result)) {
-        await result;
-      }
-    }
+    const { normal, background } = this.getListeners(event?.constructor);
+    await this.handleListenersSerially(event, normal);
+    await this.handleListenersConcurrently(event, background);
 
     return event;
   }
 
   /**
-   * Builds the events for the given subscribers and pre-computes
-   * it's dispatch function.
+   * Processes non-background event listeners serially.
    */
-  private build(options: EventDispatcherOptions): void {
-    options.subscribers.forEach(EventSubscriber => {
+  protected async handleListenersSerially<T>(
+    event: T,
+    listeners: EventListener[]
+  ): Promise<void> {
+    for (const listener of listeners) {
+      await listener.handler(event);
+    }
+  }
+
+  /**
+   * Processes background event listeners.
+   */
+  protected async handleListenersConcurrently<T>(
+    event: T,
+    listeners: EventListener[]
+  ): Promise<void> {
+    if (!listeners.length) {
+      return;
+    }
+
+    setImmediate(() => {
+      Promise.all(listeners.map(listener => listener.handler(event)));
+    });
+  }
+
+  /**
+   * Registers the event listeners for the subscribers with a
+   * computed "handler" method.
+   */
+  protected buildListeners(subscribers: Newable[]): void {
+    subscribers.forEach(EventSubscriber => {
       if (!EventDispatcherMetadata.subscribers.has(EventSubscriber)) {
         throw new Error(
           `"${EventSubscriber.name}" is not a valid EventSubscriber`
@@ -76,96 +106,77 @@ export class EventDispatcher {
         .forEach(eventMetadata => {
           const { Event } = eventMetadata;
 
-          if (!this.events.has(Event)) {
-            this.events.set(Event, []);
+          if (!this.registered.has(Event)) {
+            this.registered.set(Event, []);
           }
 
-          this.events.get(Event).push({
+          this.registered.get(Event).push({
             ...eventMetadata,
-            dispatch: this.createDispatchFunction(eventMetadata)
+            handler: this.createHandler(eventMetadata)
           });
         });
     });
   }
 
   /**
-   * Creates a tree of all the subscribed events for the given Event and
-   * it's inherited parents.
-   *
-   * Returns the cached version if it was already computed.
-   */
-  protected getEventSubscribers(Event: Newable): DispatchableEvent[] {
-    if (this.subscribers.has(Event)) {
-      return this.subscribers.get(Event);
-    }
-
-    const events: DispatchableEvent[] = [];
-
-    // check event and it's parents for any other registered events
-    let CurrentEvent = Event;
-    while (CurrentEvent) {
-      if (this.events.has(CurrentEvent)) {
-        this.events.get(CurrentEvent).forEach(e => events.push(e));
-      }
-
-      CurrentEvent = Object.getPrototypeOf(CurrentEvent);
-    }
-
-    events.sort((a, b) => b.priority - a.priority);
-
-    this.subscribers.set(Event, events);
-
-    return events;
-  }
-
-  /**
-   * Computes the event's "dispatch" method.
+   * Computes the event's "handler" method.
    *
    * It sort of optimizes the call by creating different versions of the
    * dispatcher based on it's metadata.
    */
-  protected createDispatchFunction(
-    eventMetadata: EventMetadata
-  ): DispatchEvent {
-    const { EventSubscriber, background, method } = eventMetadata;
+  protected createHandler(eventMetadata: EventMetadata): Handler {
+    const { EventSubscriber, method } = eventMetadata;
 
-    const dispatchEvent = (event: any): Promise<any> | any => {
-      // containers can potentially resolve dependencies asynchronously
-      const subscriber = this.container.get(EventSubscriber);
+    return async (event: any): Promise<any> => {
+      const subscriber = await Promise.resolve(
+        this.container.get(EventSubscriber)
+      );
       if (!subscriber) {
         throw new EventDispatcherError(
           `${EventSubscriber.name} not found in container`
         );
       }
 
-      // resolve container & emit event if container is a promise
-      if (isPromise(subscriber)) {
-        return subscriber
-          .then(s => s[method](event))
-          .catch(err => this.logger.error(err));
-      }
-
       try {
-        const result = subscriber[method](event);
-        if (isPromise(result)) {
-          result.catch(err => this.logger.error(err));
-        }
-        return result;
+        await Promise.resolve(subscriber[method](event));
       } catch (err) {
         this.logger.error(err);
       }
     };
+  }
 
-    if (background) {
-      return (event: any): any => {
-        process.nextTick(() => {
-          dispatchEvent(event);
-        });
-      };
+  /**
+   * Generate the entire listener stack which includes it's
+   * inherited event handlers.
+   */
+  protected getListeners(Event: any): EventListeners {
+    if (this.listeners.has(Event)) {
+      return this.listeners.get(Event);
     }
 
-    return (event: any): any => {
-      return dispatchEvent(event);
+    const listeners: EventListeners = {
+      normal: [],
+      background: []
     };
+
+    // check event and it's parents for any other registered events
+    let CurrentEvent = Event;
+    while (CurrentEvent) {
+      if (this.registered.has(CurrentEvent)) {
+        this.registered.get(CurrentEvent).forEach(e => {
+          listeners[e.background ? 'background' : 'normal'].push(e);
+        });
+      }
+
+      CurrentEvent = Object.getPrototypeOf(CurrentEvent);
+    }
+
+    const sort = a => a.sort((a, b) => b.priority - a.priority);
+    sort(listeners.normal);
+    sort(listeners.background);
+
+    this.listeners.set(Event, listeners);
+
+    return listeners;
   }
 }
